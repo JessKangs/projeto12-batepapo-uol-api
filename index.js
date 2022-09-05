@@ -1,4 +1,4 @@
-import express from 'express'
+import express, { response } from 'express'
 import cors from 'cors';
 import joi from 'joi';
 import dayjs from 'dayjs';
@@ -51,13 +51,16 @@ server.post("/participants", async (req, res) => {
 
     try {
        
-        const validate = await db.collection('participants').find({ data }).toArray()
+        const validate = await db.collection('participants').find({ name: data.name }).toArray()
         console.log(validate)
 
           if ( validate.length === 0 ) {
 
-            const response = await db.collection('participants').insertOne( { name: data.name, lastStatus: Date.now() },
-                {from: user, to: 'Todos', text: 'entra na sala...', type: 'status', time: dayjs().format('HH:MM:ss')})
+            const response = await db.collection('participants').insertOne( { name: data.name, lastStatus: Date.now()})
+
+            await db.collection('messages').insertOne({from: user, to: 'Todos', text: 'entra na sala...', type: 'status', time: dayjs().format('HH:MM:ss')})
+
+            console.log(response)
     
             res.status(201).send("OK") 
     
@@ -69,7 +72,7 @@ server.post("/participants", async (req, res) => {
           }
      
     } catch ( error ) {
-
+            res.status(422).send("error")
             //mongoClient.close()
     }
 
@@ -107,12 +110,9 @@ server.post("/participants", async (req, res) => {
             res.status(422).send(validation.error)
             }
 
-            console.log('TESTE')
-console.log(user)
         try {
            
-           const resposta = await db.collection('participants').find( user )
-            console.log( resposta )
+           const resposta = await db.collection('participants').find( { name: user } ).toArray()
 
             if ( resposta !== 0) {
                 const response = await db.collection('messages').insertOne( data )
@@ -128,16 +128,11 @@ console.log(user)
                 res.status(422).send("DEURUIM")
                 //mongoClient.close()
         }
-    
-        
-            console.log("UEBA")
-
             
 
     })
     
     //PEGAR MENSAGENS
-    let from;
 
     server.get("/messages", async (req, res) => {
         const { user } = req.headers;
@@ -147,23 +142,75 @@ console.log(user)
 
             const response = await db.collection('messages').find().toArray()
 
+            const list = await response.filter(
+                (value) => !(value.type === 'private_message' && value.from !== user)
+            )
+            const Newlist = list.reverse()
+
+            console.log(Newlist)
+
             if (limit) {
-                res.status(201).send(response.slice(-limit))
+                res.status(201).send(Newlist.slice(-limit))
+        
             } 
             else {
-                res.status(201).send(response)
+                res.status(201).send(Newlist)
             }
-           
-            //console.log(response)
 
         mongoClient.close()
         } catch (error) {
-
+            res.status(422).send('error')
         }
     })
     
     
     //POST STATUS
+
+    server.post("/status", async (req, res) => {
+        const { user } = req.headers;
+
+           const resposta = await db.collection('participants').find( { name: user } )
+            console.log("LULU")
+           console.log(resposta)
+
+            if ( resposta ) {
+
+                const response = await db.collection('participants').updateOne( { lastStatus: resposta.lastStatus },
+                    { $set: { lastStatus: Date.now()}})
+
+                    console.log(response)
+                    res.sendStatus(201)
+             
+                } else {
+                    res.sendStatus(404)
+                }
+        
+                //mongoClient.close()
+         
+    
+            
+
+    })
+
+    //REMOÇÃO AUTOMÁTICA 
+
+    async function verificarUsu() {
+        const lista = await db.collection("participants").find().toArray()
+
+        lista.forEach((value) => {
+            const time = Date.now() - value.lastStatus;
+            if (time > 10) {
+                db.collection("messages").insertOne({
+                    from: value.name, to: 'Todos', text: 'sai da sala...', type: 'status', time: dayjs().format('HH:MM:ss')})
+            }
+            db.collection("participants").deleteOne({
+                name: value.name
+            })
+        })
+    }
+
+    setInterval(verificarUsu, 15000)
+
 
 server.listen(5000)
 console.log("Ouvindo na porta 5000...")
